@@ -651,6 +651,148 @@ describe('supports http with nodejs', function () {
     });
   });
 
+  it('should support HTTPS over HTTPS proxy set via env var', async function () {
+    var options = {
+      key: fs.readFileSync(path.join(__dirname, 'key.pem')),
+      cert: fs.readFileSync(path.join(__dirname, 'cert.pem'))
+    };
+
+    await new Promise((resolve) => {
+      server = https.createServer(options, function (req, res) {
+        res.setHeader('Content-Type', 'text/html; charset=UTF-8');
+        res.end('12345');
+      }).listen(4444, resolve);
+    })
+
+    await new Promise((resolve) => {
+      proxy = https.createServer(options, function (request, response) {
+        var parsed = url.parse(request.url);
+        var opts = {
+          host: parsed.hostname,
+          port: parsed.port,
+          path: parsed.path,
+          protocol: parsed.protocol,
+          rejectUnauthorized: false
+        };
+
+        https.get(opts, function (res) {
+          var body = '';
+          res.on('data', function (data) {
+            body += data;
+          });
+          res.on('end', function () {
+            response.setHeader('Content-Type', 'text/html; charset=UTF-8');
+            response.end(body + '6789');
+          });
+        });
+      }).listen(4000, resolve)
+    })
+
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = 0;
+    process.env.https_proxy = 'https://localhost:4000/';
+
+    const res = await axios.get('https://localhost:4444/')
+      .finally(function () {
+        process.env.NODE_TLS_REJECT_UNAUTHORIZED = 1
+        process.env.https_proxy = ''
+      });
+
+    assert.equal(res.data, '123456789', 'should use proxy set by process.env.https_proxy');
+  });
+
+  it('should support HTTPS over HTTP proxy set via env var', async function () {
+    var options = {
+      key: fs.readFileSync(path.join(__dirname, 'key.pem')),
+      cert: fs.readFileSync(path.join(__dirname, 'cert.pem'))
+    };
+
+    await new Promise((resolve) => {
+      server = https.createServer(options, function (req, res) {
+        res.setHeader('Content-Type', 'text/html; charset=UTF-8');
+        res.end('4567');
+      }).listen(4444, resolve);
+    })
+
+    await new Promise((resolve) => {
+      proxy = http.createServer(function (request, response) {
+        var parsed = url.parse(request.url);
+        var opts = {
+          host: parsed.hostname,
+          port: parsed.port,
+          path: parsed.path
+        };
+
+        https.get(opts, function (res) {
+          var body = '';
+          res.on('data', function (data) {
+            body += data;
+          });
+          res.on('error', function (data) {
+            body += data;
+          });
+          res.on('end', function () {
+            response.setHeader('Content-Type', 'text/html; charset=UTF-8');
+            response.end(body + '1234');
+          });
+        });
+
+      }).listen(4000, resolve);
+    });
+
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = 0;
+    // set the env variable
+    process.env.https_proxy = 'http://localhost:4000/';
+    const res = await axios.get('https://localhost:4444/')
+      .finally(function () {
+        process.env.https_proxy = ''
+      });
+    assert.equal(res.data, '45671234', 'should use proxy set by process.env.https_proxy');
+  });
+
+  it('should support HTTP over HTTPS proxy set via env var', async () => {
+    var options = {
+      key: fs.readFileSync(path.join(__dirname, 'key.pem')),
+      cert: fs.readFileSync(path.join(__dirname, 'cert.pem'))
+    };
+    await new Promise((resolve) => {
+      server = http.createServer(function (req, res) {
+        res.setHeader('Content-Type', 'text/html; charset=UTF-8');
+        res.end('4567');
+      }).listen(4444, resolve)
+    })
+
+    await new Promise((resolve) => {
+      proxy = https.createServer(options, function (request, response) {
+        var parsed = url.parse(request.url);
+        var opts = {
+          host: parsed.hostname,
+          port: parsed.port,
+          path: parsed.path,
+          protocol: parsed.protocol,
+          rejectUnauthorized: false
+        };
+
+        http.get(opts, function (res) {
+          var body = '';
+          res.on('data', function (data) {
+            body += data;
+          });
+          res.on('end', function () {
+            response.setHeader('Content-Type', 'text/html; charset=UTF-8');
+            response.end(body + '1234');
+          });
+        });
+
+      }).listen(4000, resolve)
+    });
+
+    // set the env variable
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = 0;
+    process.env.http_proxy = 'https://localhost:4000';
+    const res = await axios.get('http://localhost:4444');
+    assert.equal(res.data, '45671234', 'should use proxy set by process.env.http_proxy');
+  });
+
   it('should not use proxy for domains in no_proxy', function (done) {
     server = http.createServer(function (req, res) {
       res.setHeader('Content-Type', 'text/html; charset=UTF-8');
@@ -880,4 +1022,3 @@ describe('supports http with nodejs', function () {
     });
   });
 });
-
